@@ -587,7 +587,7 @@ app.get("/api/elevenlabs/session", async (req, res) => {
     try {
       console.log(`Requesting signed session URL from ElevenLabs for agent: ${agentId}`);
       const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${agentId}`, {
-        method: "POST",
+        method: "GET",
         headers: {
           "xi-api-key": apiKey
         }
