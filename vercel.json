@@ -6,10 +6,6 @@
       "destination": "/api/health"
     },
     {
-      "source": "/api/debug-server",
-      "destination": "/api/debug-server"
-    },
-    {
       "source": "/api/:path*",
       "destination": "/api/index"
     },
