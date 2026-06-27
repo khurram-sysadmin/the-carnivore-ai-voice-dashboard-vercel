@@ -3,6 +3,8 @@ import { Calendar, Users, Clock, MessageSquare, Edit3, Trash2 } from 'lucide-rea
 import { Reservation } from '../types';
 import StatusBadge from './StatusBadge';
 
+import { formatReservationDate } from '../utils/date';
+
 interface ReservationCardProps {
   key?: React.Key;
   reservation: Reservation;
@@ -12,12 +14,7 @@ interface ReservationCardProps {
 }
 
 export default function ReservationCard({ reservation, onViewDetails, onModify, onCancel }: ReservationCardProps) {
-  const formattedDate = new Date(reservation.reservation_date).toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric'
-  });
+  const formattedDate = formatReservationDate(reservation.reservation_date);
 
   const canEdit = reservation.status === 'CONFIRMED' || reservation.status === 'MODIFIED';
 

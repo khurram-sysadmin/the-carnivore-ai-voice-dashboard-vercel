@@ -9,6 +9,8 @@ interface ReservationTableProps {
   onStatusChange: (resId: string, newStatus: ReservationStatus) => void;
 }
 
+import { formatReservationDate } from '../utils/date';
+
 const RESERVATION_STATUSES: ReservationStatus[] = ['CONFIRMED', 'MODIFIED', 'CANCELLED', 'COMPLETED', 'NO_SHOW'];
 
 export default function ReservationTable({ reservations, onViewDetails, onStatusChange }: ReservationTableProps) {
@@ -39,12 +41,7 @@ export default function ReservationTable({ reservations, onViewDetails, onStatus
           </thead>
           <tbody className="divide-y divide-zinc-150 text-sm text-zinc-800">
             {reservations.map(res => {
-              const formattedDate = new Date(res.reservation_date).toLocaleDateString(undefined, {
-                weekday: 'short',
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-              });
+              const formattedDate = formatReservationDate(res.reservation_date);
 
               return (
                 <tr key={res.id} className="hover:bg-zinc-50/50 transition-colors">

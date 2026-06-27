@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sparkles, Phone, ShoppingBag, Calendar, ListCollapse, AlertTriangle, ShieldCheck, 
   Search, Filter, Plus, Check, RefreshCw, Star, MessageSquare, AlertCircle, Eye, 
-  ArrowRight, LogIn, ChevronRight, CheckCircle2, TrendingUp, DollarSign, Users, 
+  ArrowRight, LogIn, LogOut, ChevronRight, CheckCircle2, TrendingUp, DollarSign, Users, 
   Clock, X, ChevronDown, UserCircle, LayoutGrid, PhoneCall, Play, Pause, Volume2, Cpu, Zap, ThumbsUp
 } from 'lucide-react';
 
@@ -1092,6 +1092,14 @@ export default function App() {
                 title="Refresh logs"
               >
                 <RefreshCw className="w-4 h-4" />
+              </button>
+              
+              <button
+                onClick={handleAdminLogOut}
+                className="md:hidden p-2 bg-zinc-50 hover:bg-rose-50 border border-zinc-200 hover:border-rose-200 text-rose-600 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+                title="Log Out Admin"
+              >
+                <LogOut className="w-4 h-4" />
               </button>
               
               <div className="flex items-center gap-2 px-2.5 py-1.5 md:px-3 bg-zinc-50 border border-zinc-200 rounded-xl max-w-[180px] sm:max-w-xs overflow-hidden">

@@ -1,8 +1,10 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
 
@@ -642,6 +644,169 @@ app.get("/api/elevenlabs/session", async (req, res) => {
 
   // Fallback to returning agentId only (public agents don't require signed URLs)
   res.json({ agentId });
+});
+
+// 1.5 Text Chat Zara Agent Endpoint
+app.post("/api/chat", async (req, res) => {
+  const { messages } = req.body;
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: "Missing messages array in request body." });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === "your-gemini-api-key") {
+    // Return mock response when Gemini key is not configured
+    const lastMsg = messages[messages.length - 1]?.content || "";
+    let responseText = "Hi! I am Zara, your virtual assistant. To start chatting with me, please configure the `GEMINI_API_KEY` in your environment. Let me know if you want to place a meat order or reserve a table!";
+    
+    if (lastMsg.toLowerCase().includes("order") || lastMsg.toLowerCase().includes("lamb") || lastMsg.toLowerCase().includes("meat")) {
+      responseText = "I see you want to order food. To do this, I will need you to provide your item names, quantities or weights, your order type (delivery, pickup, or dine-in), and your contact details. Please activate the Gemini API Key to enable this automated chat flow!";
+    } else if (lastMsg.toLowerCase().includes("reserve") || lastMsg.toLowerCase().includes("table") || lastMsg.toLowerCase().includes("book")) {
+      responseText = "I can help you reserve a table. Normally I will collect your booking date, time, number of guests, and contact information. To unlock this interactive feature, please set the GEMINI_API_KEY variable on the server.";
+    }
+    
+    return res.json({ text: responseText });
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    
+    // Load Zara system instructions and menu knowledge
+    let systemInstruction = "You are Zara, the professional restaurant voice agent for The Carnivore.";
+    try {
+      const promptPath = path.join(process.cwd(), "elevenlabs_zara_system_prompt.txt");
+      const menuPath = path.join(process.cwd(), "elevenlabs_menu_knowledge.md");
+      
+      const promptContent = fs.existsSync(promptPath) ? fs.readFileSync(promptPath, "utf-8") : "";
+      const menuContent = fs.existsSync(menuPath) ? fs.readFileSync(menuPath, "utf-8") : "";
+      
+      systemInstruction = `${promptContent}\n\n${menuContent}`;
+    } catch (e) {
+      console.warn("Could not read local prompt files for Gemini chat. Using basic instruction.", e);
+    }
+
+    // Convert messages array into Gemini contents structure
+    // Gemini roles: 'user' and 'model'
+    const contents = messages.map(msg => ({
+      role: msg.role === "zara" ? "model" : "user",
+      parts: [{ text: msg.content }]
+    }));
+
+    const tools: any = [{
+      functionDeclarations: [
+        {
+          name: "n8nRestaurantAutomation",
+          description: "FINAL EXECUTION ONLY. Use this tool only after Zara has collected the complete request, read it back to the customer, and the customer explicitly confirms it. Never use this tool as a missing-field checker, partial validator, or price preview.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              transcript: {
+                type: "STRING",
+                description: "The full conversation transcript including final customer confirmation."
+              },
+              intent: {
+                type: "STRING",
+                description: "Enum: PLACE_ORDER, BOOK_RESERVATION, MODIFY_ORDER, MODIFY_RESERVATION, CANCEL_ORDER, CANCEL_RESERVATION, ORDER_STATUS, DELIVERY_ETA, RESERVATION_STATUS, SEND_MENU, FAQ, DIETARY_INFO, LOCATION_DIRECTIONS, FEEDBACK, HUMAN_ESCALATION"
+              },
+              caller_phone: { type: "STRING" },
+              caller_name: { type: "STRING" },
+              customer_email: { type: "STRING" }
+            },
+            required: ["transcript"]
+          }
+        }
+      ]
+    }];
+
+    // Generate content using Gemini
+    let response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents,
+      config: {
+        systemInstruction,
+        tools
+      }
+    });
+
+    const functionCalls = response.functionCalls;
+    if (functionCalls && functionCalls.length > 0) {
+      const call = functionCalls[0];
+      if (call.name === "n8nRestaurantAutomation") {
+        const args = call.args as any;
+        let n8nResponse: any = null;
+
+        // Perform the POST call to n8n webhook
+        if (process.env.N8N_WEBHOOK_URL) {
+          try {
+            const fetchRes = await fetch(process.env.N8N_WEBHOOK_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...args,
+                timestamp: new Date().toISOString()
+              })
+            });
+            n8nResponse = await fetchRes.json();
+          } catch (err: any) {
+            console.error("Error pinging n8n from chat session:", err);
+            n8nResponse = { success: false, error: err.message };
+          }
+        } else {
+          // Fallback mocked n8n response for testing
+          n8nResponse = {
+            success: true,
+            spoken_response: "Thank you, your order has been placed. Your order ID is ORD-9999. We are preparing it now."
+          };
+        }
+
+        // Send function execution output back to Gemini
+        const secondResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [
+            ...contents,
+            { role: "model", parts: [{ functionCall: call }] },
+            { role: "user", parts: [{ functionResponse: { name: "n8nRestaurantAutomation", response: n8nResponse } }] }
+          ],
+          config: {
+            systemInstruction
+          }
+        });
+
+        // Save call log in database so that it shows in admin timeline
+        try {
+          const transcriptStr = messages.map(m => `${m.role === "zara" ? "Zara" : "You"}: ${m.content}`).join("\n") + `\nZara: ${secondResponse.text}`;
+          if (supabase && !missingTables.has("call_logs")) {
+            await supabase.from("call_logs").insert([{
+              customer_name: args.caller_name || "Chat Customer",
+              customer_phone: args.caller_phone || "Chat Session",
+              duration_seconds: 0,
+              transcript: transcriptStr,
+              status: "COMPLETED"
+            }]);
+          } else {
+            localCallLogs.unshift({
+              id: `call-${Date.now()}`,
+              customer_name: args.caller_name || "Chat Customer",
+              customer_phone: args.caller_phone || "Chat Session",
+              duration_seconds: 0,
+              transcript: transcriptStr,
+              status: "COMPLETED",
+              created_at: new Date().toISOString()
+            });
+          }
+        } catch (e) {
+          console.error("Failed to log chat conversation to call_logs:", e);
+        }
+
+        return res.json({ text: secondResponse.text, n8nResult: n8nResponse });
+      }
+    }
+
+    return res.json({ text: response.text });
+  } catch (error: any) {
+    console.error("Gemini Chat Error:", error);
+    res.status(500).json({ error: error.message || "Failed to process chat conversation." });
+  }
 });
 
 // 2. Menu Items

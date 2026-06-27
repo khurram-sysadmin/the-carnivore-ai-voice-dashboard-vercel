@@ -4,6 +4,8 @@ import { X, Calendar, Users, Clock, ShoppingBag, CreditCard, MapPin, CheckCircle
 import { Order, Reservation } from '../types';
 import StatusBadge from './StatusBadge';
 
+import { formatReservationDate } from '../utils/date';
+
 interface RecordDetailDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -240,12 +242,7 @@ export default function RecordDetailDrawer({
                           <span className="text-sm text-zinc-600 font-medium">Date</span>
                         </div>
                         <span className="text-sm font-bold text-zinc-900">
-                          {new Date((record as Reservation).reservation_date).toLocaleDateString(undefined, {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric'
-                          })}
+                          {formatReservationDate((record as Reservation).reservation_date)}
                         </span>
                       </div>
 
