@@ -734,7 +734,7 @@ app.post("/api/chat", async (req, res) => {
       if (call.name === "n8nRestaurantAutomation") {
         const args = call.args as any;
         let n8nResponse: any = null;
-
+ 
         // Perform the POST call to n8n webhook
         if (process.env.N8N_WEBHOOK_URL) {
           try {
@@ -747,18 +747,33 @@ app.post("/api/chat", async (req, res) => {
               })
             });
             n8nResponse = await fetchRes.json();
+            
+            // Validate that the n8n response indicates success
+            if (!n8nResponse || n8nResponse.success === false) {
+              const errMsg = n8nResponse?.error || "N8N automation returned a failure response.";
+              n8nResponse = {
+                success: false,
+                error: errMsg,
+                spoken_response: `I'm sorry, but your request could not be completed. Error details: ${errMsg}`
+              };
+            }
           } catch (err: any) {
             console.error("Error pinging n8n from chat session:", err);
-            n8nResponse = { success: false, error: err.message };
+            n8nResponse = {
+              success: false,
+              error: err.message || "Failed to contact automation server.",
+              spoken_response: "I'm sorry, but your request could not be completed due to a connection issue with the automation server."
+            };
           }
         } else {
-          // Fallback mocked n8n response for testing
+          // Fail explicitly when webhook is not configured - never simulate success
           n8nResponse = {
-            success: true,
-            spoken_response: "Thank you, your order has been placed. Your order ID is ORD-9999. We are preparing it now."
+            success: false,
+            error: "Chat automation is not configured. Please set the N8N_WEBHOOK_URL environment variable on the server.",
+            spoken_response: "I'm sorry, but I cannot complete this request because the chat automation is not configured on the server."
           };
         }
-
+ 
         // Send function execution output back to Gemini
         const secondResponse = await ai.models.generateContent({
           model: "gemini-2.5-flash",
@@ -771,17 +786,20 @@ app.post("/api/chat", async (req, res) => {
             systemInstruction
           }
         });
-
+ 
         // Save call log in database so that it shows in admin timeline
         try {
           const transcriptStr = messages.map(m => `${m.role === "zara" ? "Zara" : "You"}: ${m.content}`).join("\n") + `\nZara: ${secondResponse.text}`;
+          const isSuccess = n8nResponse && n8nResponse.success === true;
+          const logStatus = isSuccess ? "COMPLETED" : "FAILED";
+ 
           if (supabase && !missingTables.has("call_logs")) {
             await supabase.from("call_logs").insert([{
               customer_name: args.caller_name || "Chat Customer",
               customer_phone: args.caller_phone || "Chat Session",
               duration_seconds: 0,
               transcript: transcriptStr,
-              status: "COMPLETED"
+              status: logStatus
             }]);
           } else {
             localCallLogs.unshift({
@@ -790,14 +808,14 @@ app.post("/api/chat", async (req, res) => {
               customer_phone: args.caller_phone || "Chat Session",
               duration_seconds: 0,
               transcript: transcriptStr,
-              status: "COMPLETED",
+              status: logStatus,
               created_at: new Date().toISOString()
             });
           }
         } catch (e) {
           console.error("Failed to log chat conversation to call_logs:", e);
         }
-
+ 
         return res.json({ text: secondResponse.text, n8nResult: n8nResponse });
       }
     }
