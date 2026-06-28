@@ -27,11 +27,16 @@ export default function MobileNav({ currentTab, onTabChange, role, unreadCount =
   ];
 
   const tabs = role === 'customer' ? customerTabs : ownerTabs;
+  const isOwner = role === 'owner';
 
   return (
     <div
       id="mobile-bottom-nav"
-      className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 z-40 px-2 py-1.5 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] flex items-center justify-around"
+      className={`md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-zinc-200 z-40 py-1.5 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] flex items-center ${
+        isOwner 
+          ? 'justify-start overflow-x-auto scrollbar-none gap-1 px-4' 
+          : 'justify-around px-2'
+      }`}
     >
       {tabs.map(tab => {
         const Icon = tab.icon;
@@ -41,7 +46,9 @@ export default function MobileNav({ currentTab, onTabChange, role, unreadCount =
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`flex flex-col items-center justify-center flex-1 py-1 px-2 rounded-xl transition-all cursor-pointer relative ${
+            className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all cursor-pointer relative ${
+              isOwner ? 'flex-shrink-0 min-w-[68px]' : 'flex-1'
+            } ${
               isActive 
                 ? 'text-red-600 font-bold' 
                 : 'text-zinc-400 hover:text-zinc-600'
