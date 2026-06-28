@@ -1324,6 +1324,69 @@ export default function App() {
                       ));
                     })()}
                     </div>
+
+                    {/* Active Reservations Monitor */}
+                    <div className="space-y-4 mt-6">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-zinc-900 text-base">Active Reservations Monitor</h3>
+                        <button onClick={() => setActiveTab('reservations')} className="text-xs font-bold text-red-600 flex items-center gap-0.5 hover:underline bg-transparent border-none cursor-pointer">
+                          <span>All Reservations</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {(() => {
+                          const activeReservations = reservations.filter(r => r.status !== 'COMPLETED' && r.status !== 'CANCELLED' && r.status !== 'NO_SHOW');
+                          if (activeReservations.length === 0) {
+                            return (
+                              <div className="col-span-1 md:col-span-2 flex flex-col items-center justify-center py-12 text-center bg-white border border-zinc-200 rounded-2xl">
+                                <Calendar className="w-8 h-8 text-zinc-300 mb-2" />
+                                <p className="text-sm text-zinc-500 font-semibold">No active reservations right now</p>
+                                <p className="text-[10px] text-zinc-400 mt-1">New reservations will show up here automatically.</p>
+                              </div>
+                            );
+                          }
+                          return activeReservations.slice(0, 4).map(r => (
+                            <div key={r.id} className="bg-white border border-zinc-200 rounded-2xl p-4 flex flex-col justify-between shadow-sm hover:shadow">
+                              <div>
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono text-xs font-bold bg-zinc-100 border px-1.5 py-0.5 rounded text-zinc-800">
+                                    RES-{r.reservation_number}
+                                  </span>
+                                  <StatusBadge status={r.status} />
+                                </div>
+                                <p className="font-bold text-sm text-zinc-800 mt-3 line-clamp-1">
+                                  {r.special_requests ? `Requests: ${r.special_requests}` : 'No special requests'}
+                                </p>
+                                <span className="text-[10px] text-zinc-400 block mt-1">{r.customer_name} • {r.customer_phone}</span>
+                              </div>
+
+                              <div className="flex items-center justify-between border-t border-zinc-150 pt-3 mt-4">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold text-zinc-700 bg-zinc-50 px-2 py-0.5 rounded border border-zinc-200">
+                                    {r.party_size} {r.party_size === 1 ? 'Guest' : 'Guests'}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-zinc-500">
+                                    {r.reservation_date} at {r.reservation_time}
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setSelectedRecord(r);
+                                    setSelectedRecordType('reservation');
+                                    setIsDrawerOpen(true);
+                                  }}
+                                  className="text-xs bg-zinc-50 border hover:bg-zinc-100 text-zinc-650 px-2 py-1 rounded-lg font-bold transition-all cursor-pointer border-none"
+                                >
+                                  Manage
+                                </button>
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Right list block - timeline log */}
