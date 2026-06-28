@@ -214,12 +214,7 @@ let localReservations = [
   }
 ];
 
-let localEvents: any[] = [
-  { id: "e-1", ref_id: "o-1", type: "order", event_type: "CREATED", note: "Order placed by customer via voice agent Zara", created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString() },
-  { id: "e-2", ref_id: "o-2", type: "order", event_type: "CREATED", note: "Order placed via website checkout", created_at: new Date(Date.now() - 40 * 60 * 1000).toISOString() },
-  { id: "e-3", ref_id: "o-2", type: "order", event_type: "STATUS_CHANGE", note: "Status changed to Preparing", created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString() },
-  { id: "e-4", ref_id: "r-1", type: "reservation", event_type: "CREATED", note: "Table booked via voice agent Zara", created_at: new Date(Date.now() - 120 * 60 * 1000).toISOString() },
-];
+let localEvents: any[] = [];
 
 let localFeedback = [
   { id: "fb-1", customer_name: "Robert Evans", customer_phone: "+15557771111", customer_email: "robert@example.com", rating: 5, comment: "Amazing camel meat! Highly recommended. Zara voice agent was super smooth.", status: "NEW", created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() },

@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutGrid, ShoppingBag, Calendar, ListCollapse, AlertTriangle, Sparkles, Database, Webhook, LogOut, PhoneCall } from 'lucide-react';
+import { LayoutGrid, ShoppingBag, Calendar, ListCollapse, AlertTriangle, Sparkles, Database, Webhook, LogOut, PhoneCall, TrendingUp } from 'lucide-react';
 import CarnivoreLogo from './CarnivoreLogo';
 
 interface OwnerSidebarProps {
@@ -21,6 +21,7 @@ export default function OwnerSidebar({ currentTab, onTabChange, config, onLogOut
     { id: 'menu', name: 'Manage Menu', icon: ListCollapse },
     { id: 'call_logs', name: 'Call Logs', icon: PhoneCall },
     { id: 'escalations', name: 'Escalations & Feedback', icon: AlertTriangle },
+    { id: 'revenue', name: 'Revenue Analytics', icon: TrendingUp },
   ];
 
   return (

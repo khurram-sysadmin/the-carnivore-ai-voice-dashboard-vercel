@@ -151,6 +151,12 @@ export default function App() {
   const [fbSuccess, setFbSuccess] = useState(false);
   const [showElevenLabsChecklist, setShowElevenLabsChecklist] = useState(false);
 
+  // Revenue filters state
+  const [revDateFilter, setRevDateFilter] = useState('');
+  const [revMonthFilter, setRevMonthFilter] = useState('ALL');
+  const [revTimeFilter, setRevTimeFilter] = useState('ALL');
+  const [revTypeFilter, setRevTypeFilter] = useState<'ALL' | 'ORDERS' | 'RESERVATIONS'>('ALL');
+
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ show: true, msg, type });
     setTimeout(() => {
@@ -549,6 +555,95 @@ export default function App() {
     const matchesEmail = !customerEmailFilter || String(r.customer_email || '').toLowerCase().includes(customerEmailFilter.toLowerCase());
     return matchesSearch && matchesStatus && matchesDate && matchesPhone && matchesEmail;
   });
+
+  // Filter completed orders and reservations for revenue analytics
+  const completedOrders = orders.filter(o => o.status === 'COMPLETED');
+  const completedReservations = reservations.filter(r => r.status === 'COMPLETED');
+
+  // Filter completed orders based on selection
+  const filteredRevOrders = completedOrders.filter(o => {
+    if (revDateFilter) {
+      const orderDate = new Date(o.created_at).toISOString().split('T')[0];
+      if (orderDate !== revDateFilter) return false;
+    }
+    if (revMonthFilter !== 'ALL') {
+      const orderMonth = new Date(o.created_at).getMonth();
+      if (orderMonth !== Number(revMonthFilter)) return false;
+    }
+    if (revTimeFilter !== 'ALL') {
+      const hour = new Date(o.created_at).getHours();
+      if (revTimeFilter === 'MORNING' && (hour < 6 || hour >= 12)) return false;
+      if (revTimeFilter === 'AFTERNOON' && (hour < 12 || hour >= 18)) return false;
+      if (revTimeFilter === 'EVENING' && (hour < 18 || hour >= 23)) return false;
+      if (revTimeFilter === 'NIGHT' && (hour >= 23 || hour < 6)) return false;
+    }
+    return true;
+  });
+
+  // Filter completed reservations based on selection
+  const filteredRevReservations = completedReservations.filter(r => {
+    if (revDateFilter) {
+      if (r.reservation_date !== revDateFilter) return false;
+    }
+    if (revMonthFilter !== 'ALL') {
+      const dateParts = r.reservation_date.split('-');
+      const resMonth = dateParts[1] ? Number(dateParts[1]) - 1 : -1;
+      if (resMonth !== Number(revMonthFilter)) return false;
+    }
+    if (revTimeFilter !== 'ALL') {
+      let hour = 12;
+      const timeStr = r.reservation_time.toLowerCase();
+      const match = timeStr.match(/^(\d+):(\d+)\s*(pm|am)?/);
+      if (match) {
+        let h = Number(match[1]);
+        const isPm = match[3] === 'pm';
+        const isAm = match[3] === 'am';
+        if (isPm && h < 12) h += 12;
+        if (isAm && h === 12) h = 0;
+        hour = h;
+      } else {
+        const parts = timeStr.split(':');
+        if (parts[0]) hour = Number(parts[0]);
+      }
+      if (revTimeFilter === 'MORNING' && (hour < 6 || hour >= 12)) return false;
+      if (revTimeFilter === 'AFTERNOON' && (hour < 12 || hour >= 18)) return false;
+      if (revTimeFilter === 'EVENING' && (hour < 18 || hour >= 23)) return false;
+      if (revTimeFilter === 'NIGHT' && (hour >= 23 || hour < 6)) return false;
+    }
+    return true;
+  });
+
+  const completedRevOrdersRevenue = filteredRevOrders.reduce((sum, o) => sum + Number(o.total_amount || 0), 0);
+  const completedRevReservationsGuests = filteredRevReservations.reduce((sum, r) => sum + Number(r.party_size || 0), 0);
+
+  const combinedRevItems = [
+    ...filteredRevOrders.map(o => ({
+      id: o.id,
+      number: o.order_number ? `ORD-${o.order_number}` : 'ORD-NEW',
+      type: 'Order' as const,
+      customer: o.customer_name,
+      date: new Date(o.created_at).toISOString().split('T')[0],
+      time: new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      details: o.items?.map((item: any) => `${item.quantity}x ${item.item_name}`).join(', ') || 'Custom order',
+      amount: Number(o.total_amount || 0),
+      raw_date: o.created_at
+    })),
+    ...filteredRevReservations.map(r => ({
+      id: r.id,
+      number: r.reservation_number ? `RES-${r.reservation_number}` : 'RES-NEW',
+      type: 'Reservation' as const,
+      customer: r.customer_name,
+      date: r.reservation_date,
+      time: r.reservation_time,
+      details: `Table for ${r.party_size} guests`,
+      amount: 0,
+      raw_date: `${r.reservation_date}T${r.reservation_time.includes(':') ? (r.reservation_time.split(' ')[0]?.includes(':') ? r.reservation_time.split(' ')[0] : '00:00') : '00:00'}`
+    }))
+  ].filter(item => {
+    if (revTypeFilter === 'ORDERS') return item.type === 'Order';
+    if (revTypeFilter === 'RESERVATIONS') return item.type === 'Reservation';
+    return true;
+  }).sort((a, b) => new Date(b.raw_date).getTime() - new Date(a.raw_date).getTime());
 
   return (
     <div id="app-root-container" className="min-h-screen bg-zinc-50 flex flex-col justify-between">
@@ -1941,6 +2036,222 @@ export default function App() {
               </div>
             )}
 
+            {/* Tab view routing: Revenue Report */}
+            {activeTab === 'revenue' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-bold text-zinc-900 text-base tracking-tight flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-red-500" />
+                    Revenue & Earnings Analytics
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Real-time transaction values of completed restaurant orders and guest covers.
+                  </p>
+                </div>
+
+                {/* Filter Controls Card */}
+                <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-100 pb-2.5">
+                    <h4 className="text-xs font-black uppercase text-zinc-500 tracking-wider">Report Filters</h4>
+                    {(revDateFilter || revMonthFilter !== 'ALL' || revTimeFilter !== 'ALL' || revTypeFilter !== 'ALL') && (
+                      <button
+                        onClick={() => {
+                          setRevDateFilter('');
+                          setRevMonthFilter('ALL');
+                          setRevTimeFilter('ALL');
+                          setRevTypeFilter('ALL');
+                        }}
+                        className="text-xs font-bold text-red-650 hover:text-red-500 transition-colors cursor-pointer"
+                      >
+                        Reset Filters
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* 1. Type Selector */}
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Record Type</label>
+                      <select
+                        value={revTypeFilter}
+                        onChange={e => setRevTypeFilter(e.target.value as any)}
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-700 font-bold focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
+                      >
+                        <option value="ALL">All Completed Actions</option>
+                        <option value="ORDERS">Completed Orders Only</option>
+                        <option value="RESERVATIONS">Completed Bookings Only</option>
+                      </select>
+                    </div>
+
+                    {/* 2. Date selector */}
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Specific Date</label>
+                      <input
+                        type="date"
+                        value={revDateFilter}
+                        onChange={e => setRevDateFilter(e.target.value)}
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-1.5 text-xs text-zinc-700 font-semibold focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* 3. Month selector */}
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Month of Year</label>
+                      <select
+                        value={revMonthFilter}
+                        onChange={e => setRevMonthFilter(e.target.value)}
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-700 font-bold focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
+                      >
+                        <option value="ALL">All Months</option>
+                        {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, idx) => (
+                          <option key={idx} value={idx}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 4. Shift/Time filter */}
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-zinc-400 block mb-1.5">Shift / Period</label>
+                      <select
+                        value={revTimeFilter}
+                        onChange={e => setRevTimeFilter(e.target.value)}
+                        className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2 text-xs text-zinc-700 font-bold focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
+                      >
+                        <option value="ALL">All Shifts (24 Hours)</option>
+                        <option value="MORNING">Breakfast/Morning (6 AM - 12 PM)</option>
+                        <option value="AFTERNOON">Lunch/Afternoon (12 PM - 6 PM)</option>
+                        <option value="EVENING">Dinner/Evening (6 PM - 11 PM)</option>
+                        <option value="NIGHT">Late Night (11 PM - 6 AM)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Metric Bento Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Orders Revenue</span>
+                      <h4 className="text-xl font-black text-red-600 mt-1.5">
+                        PKR {completedRevOrdersRevenue.toLocaleString()}
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Sum of completed bills</p>
+                  </div>
+
+                  <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Orders</span>
+                      <h4 className="text-xl font-black text-zinc-800 mt-1.5">
+                        {filteredRevOrders.length} orders
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total items delivered</p>
+                  </div>
+
+                  <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Bookings</span>
+                      <h4 className="text-xl font-black text-zinc-800 mt-1.5">
+                        {filteredRevReservations.length} tables
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total reservations seated</p>
+                  </div>
+
+                  <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Completed Guest Covers</span>
+                      <h4 className="text-xl font-black text-teal-650 mt-1.5">
+                        {completedRevReservationsGuests} guests
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-3 font-semibold uppercase">Total seated party size</p>
+                  </div>
+                </div>
+
+                {/* Unified Earnings Table */}
+                <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="px-6 py-4 border-b border-zinc-150 bg-zinc-50 flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase text-zinc-500 tracking-wider">Completed Transactions Log</h4>
+                    <span className="text-[10px] font-mono font-bold text-zinc-450 bg-zinc-200 px-2 py-0.5 rounded">
+                      {combinedRevItems.length} matching
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-zinc-50 border-b border-zinc-200 text-zinc-500 text-[10px] font-bold uppercase tracking-wider">
+                          <th className="px-6 py-3">ID / Number</th>
+                          <th className="px-6 py-3">Type</th>
+                          <th className="px-6 py-3">Customer</th>
+                          <th className="px-6 py-3">Date & Time</th>
+                          <th className="px-6 py-3">Summary Details</th>
+                          <th className="px-6 py-3 text-right">Revenue Value</th>
+                          <th className="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-150 text-xs text-zinc-700">
+                        {combinedRevItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="px-6 py-12 text-center text-zinc-400 font-medium italic">
+                              No completed records match the selected filter criteria.
+                            </td>
+                          </tr>
+                        ) : (
+                          combinedRevItems.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-zinc-50/50 transition-colors">
+                              <td className="px-6 py-3.5 whitespace-nowrap">
+                                <span className="font-mono font-bold text-zinc-800 bg-zinc-100 border px-1.5 py-0.5 rounded">
+                                  {item.number}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5 whitespace-nowrap">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                                  item.type === 'Order' ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-teal-50 text-teal-700 border border-teal-100'
+                                }`}>
+                                  {item.type}
+                                </span>
+                              </td>
+                              <td className="px-6 py-3.5 whitespace-nowrap font-semibold text-zinc-800">
+                                {item.customer}
+                              </td>
+                              <td className="px-6 py-3.5 whitespace-nowrap text-zinc-500 font-medium">
+                                {item.date} at {item.time}
+                              </td>
+                              <td className="px-6 py-3.5 max-w-xs truncate text-zinc-650" title={item.details}>
+                                {item.details}
+                              </td>
+                              <td className="px-6 py-3.5 text-right font-black text-zinc-900 whitespace-nowrap">
+                                {item.type === 'Order' ? `PKR ${item.amount.toLocaleString()}` : '-'}
+                              </td>
+                              <td className="px-6 py-3.5 text-right whitespace-nowrap">
+                                <button
+                                  onClick={() => {
+                                    const record = item.type === 'Order' 
+                                      ? orders.find(o => o.id === item.id)
+                                      : reservations.find(r => r.id === item.id);
+                                    if (record) {
+                                      setSelectedRecord(record);
+                                      setSelectedRecordType(item.type === 'Order' ? 'order' : 'reservation');
+                                      setIsDrawerOpen(true);
+                                    }
+                                  }}
+                                  className="text-[10px] font-bold text-red-600 hover:text-red-500 transition-colors cursor-pointer border-none bg-transparent"
+                                >
+                                  View Details
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </main>
 
           {/* Mobile Admin navigation bar */}
