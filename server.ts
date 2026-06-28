@@ -1583,12 +1583,26 @@ app.post("/api/feedback", async (req, res) => {
     id: `fb-${Date.now()}`,
     status: "NEW",
     created_at: new Date().toISOString(),
-    ...req.body
+    customer_name: req.body.customer_name,
+    customer_phone: req.body.customer_phone || null,
+    customer_email: req.body.customer_email || null,
+    rating: Number(req.body.rating || 5),
+    comment: req.body.comment
   };
 
   if (supabase && !missingTables.has("feedback")) {
-    const { data, error } = await supabase.from("feedback").insert([req.body]).select();
-    if (!error && data) return res.status(201).json(data[0]);
+    const { data, error } = await supabase.from("feedback").insert([{
+      customer_name: req.body.customer_name,
+      customer_phone: req.body.customer_phone || null,
+      customer_email: req.body.customer_email || null,
+      rating: Number(req.body.rating || 5),
+      comment: req.body.comment,
+      status: "NEW"
+    }]).select();
+
+    if (!error && data && data[0]) {
+      return res.status(201).json(data[0]);
+    }
     handleSupabaseError("feedback", error, "insert");
   }
 
