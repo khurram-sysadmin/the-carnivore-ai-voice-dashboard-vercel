@@ -677,10 +677,40 @@ export default function App() {
 
       {/* 2. CUSTOMER VIEW MODULE */}
       {role === 'customer' && (
-        <div className="flex-1 flex flex-col pb-24 md:pb-10">
+        <div className="flex-1 flex flex-col pb-24 md:pb-10 relative overflow-hidden bg-zinc-50/40">
           
+          {/* Floating animated background mesh blobs */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+            <motion.div
+              animate={{
+                x: [0, 45, -30, 0],
+                y: [0, -60, 40, 0],
+                scale: [1, 1.15, 0.9, 1]
+              }}
+              transition={{
+                duration: 20,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="absolute top-24 left-12 md:left-48 w-80 md:w-[450px] h-80 md:h-[450px] bg-red-100/40 rounded-full filter blur-3xl mix-blend-multiply opacity-55"
+            />
+            <motion.div
+              animate={{
+                x: [0, -35, 45, 0],
+                y: [0, 50, -60, 0],
+                scale: [1, 0.9, 1.15, 1]
+              }}
+              transition={{
+                duration: 24,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="absolute top-48 right-12 md:right-48 w-80 md:w-[450px] h-80 md:h-[450px] bg-amber-100/35 rounded-full filter blur-3xl mix-blend-multiply opacity-45"
+            />
+          </div>
+
           {/* Main Top Header */}
-          <header className="bg-white border-b border-zinc-200 py-3 px-4 sm:px-6 sticky top-0 z-30">
+          <header className="z-10 bg-white/80 backdrop-blur-md border-b border-zinc-200 py-3 px-4 sm:px-6 sticky top-0">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <CarnivoreLogo className="w-10 h-10" />
@@ -705,44 +735,10 @@ export default function App() {
           </header>
 
           {/* Customer Container Grid */}
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <main className="z-10 flex-1 max-w-7xl w-full mx-auto px-4 md:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
             
             {/* Left/Middle Column (8-col width on desktop) */}
             <div className="lg:col-span-8 space-y-6">
-              
-               {/* Query Lookup search */}
-              <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-sm">
-                <h2 className="text-base font-bold text-zinc-950 flex items-center gap-2 mb-1">
-                  <Search className="w-5 h-5 text-zinc-500" />
-                  Quick Booking & Order Tracker
-                </h2>
-                <p className="text-xs text-zinc-500 mb-3 leading-relaxed">
-                  To protect your data privacy, your bookings are not loaded publicly. Search using your <strong>Order Number (ORD-####)</strong>, <strong>Reservation ID (RES-####)</strong>, <strong>Email</strong>, or <strong>Phone Number</strong> to securely access and track your records.
-                </p>
-                <form onSubmit={handleCustomerQuerySearch} className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={customerSearch}
-                    onChange={e => setCustomerSearch(e.target.value)}
-                    placeholder="Search ORD-1001, RES-1001, email, or phone..."
-                    className="w-full sm:flex-1 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-sm text-zinc-800 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-red-500 focus:bg-white"
-                  />
-                  <button
-                    type="submit"
-                    disabled={customerSearchLoading}
-                    className="w-full sm:w-auto bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-400 text-white font-bold px-5 py-2.5 rounded-xl text-xs cursor-pointer shadow-sm flex items-center gap-1.5 min-w-[85px] justify-center transition-colors"
-                  >
-                    {customerSearchLoading ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <>
-                        <span>Track</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </>
-                    )}
-                  </button>
-                </form>
-              </div>
 
               {/* Dynamic Customer Tabs navigation (Always visible and scrollable) */}
               <div className="flex border-b border-zinc-200 overflow-x-auto scrollbar-none sticky top-[65px] bg-zinc-50/95 backdrop-blur-sm z-25 py-1 -mx-4 px-4 sm:mx-0 sm:px-0">
@@ -803,36 +799,7 @@ export default function App() {
                       onClearAction={() => setSelectedVoiceAction('')}
                     />
 
-                    {/* Quick Trigger context panels */}
-                    <div>
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3">Quick commands for Zara</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                        {[
-                          { action: 'order', label: 'Order Food', desc: 'Place a meat order', icon: ShoppingBag },
-                          { action: 'reservation', label: 'Book a Table', desc: 'Table reservation', icon: Calendar },
-                          { action: 'eta', label: 'Check ETA', desc: 'Driver status & timeline', icon: Clock },
-                          { action: 'cancel_order', label: 'Cancel Order', desc: 'Request ORD cancellation', icon: X },
-                          { action: 'cancel_res', label: 'Cancel Reservation', desc: 'Request table cancellation', icon: X },
-                        ].map((btn, i) => {
-                          const Icon = btn.icon;
-                          return (
-                            <button
-                              key={i}
-                              onClick={() => triggerVoiceAction(btn.action)}
-                              className="bg-white hover:bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-left transition-colors cursor-pointer flex flex-col justify-between h-full hover:border-red-500/40"
-                            >
-                              <div className="p-2 bg-red-50 rounded-lg text-red-600 w-max mb-3 border border-red-100">
-                                <Icon className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <span className="font-bold text-sm text-zinc-900 block leading-tight">{btn.label}</span>
-                                <span className="text-[10px] text-zinc-400 block mt-1">{btn.desc}</span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+
                   </motion.div>
                 )}
 
