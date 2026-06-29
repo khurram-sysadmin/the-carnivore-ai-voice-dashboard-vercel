@@ -683,6 +683,34 @@ export default function CallZaraWidget({ onRecordCreated, preSelectedAction, onC
       setTranscript(prev => [...prev, { speaker: 'You', text: transcriptEntry }]);
       setDetailsSent(true);
       setDetailsFormVisible(false);
+
+      if (detailsFormMode === 'callback') {
+        const currentTranscript = [...transcript, { speaker: 'You' as const, text: transcriptEntry }]
+          .map(t => `${t.speaker}: ${t.text}`)
+          .join('\n');
+
+        fetch('/api/escalations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customer_name: typedDetails.name.trim() || 'Voice Caller',
+            customer_phone: typedDetails.phone.trim() || 'Active Live Session',
+            customer_email: typedDetails.email.trim() || 'unknown@thecarnivore.local',
+            reason: 'Manager callback requested via voice widget form',
+            transcript: currentTranscript
+          })
+        })
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          console.log("Escalation logged successfully from form:", data);
+        })
+        .catch(err => {
+          console.error("Failed to log escalation from form:", err);
+        });
+      }
     } catch (err) {
       console.error("Failed to send typed details to Zara:", err);
       setDetailsSent(false);

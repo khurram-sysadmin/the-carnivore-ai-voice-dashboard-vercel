@@ -539,7 +539,7 @@ export default function App() {
   const handleCallRecordCreated = (record?: any) => {
     loadData();
 
-    if (role !== 'customer' || record?.source === 'chat') return;
+    if (record?.source === 'chat') return;
 
     setPostCallContext(record || null);
     setFbSuccess(false);
@@ -2470,7 +2470,7 @@ export default function App() {
 
       {/* Post-call feedback prompt */}
       <AnimatePresence>
-        {showPostCallFeedback && role === 'customer' && (
+        {showPostCallFeedback && (
           <motion.div
             className="fixed inset-0 z-50 bg-zinc-950/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-6"
             initial={{ opacity: 0 }}

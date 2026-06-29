@@ -1824,6 +1824,82 @@ app.post("/api/call-logs", async (req, res) => {
     created_at: new Date().toISOString()
   };
 
+  // Check if this call log qualifies for an escalation
+  const lowerTranscript = (newCallLog.transcript || "").toLowerCase();
+  const hasCallbackForm = lowerTranscript.includes("typed details sent:\nname:") || lowerTranscript.includes("manager callback form") || lowerTranscript.includes("typed details sent:\nname");
+  const isEscalationRequested = 
+    hasCallbackForm || 
+    lowerTranscript.includes("human callback requested") || 
+    (
+      (lowerTranscript.includes("manager") || lowerTranscript.includes("escalat") || lowerTranscript.includes("human agent") || lowerTranscript.includes("complaint") || lowerTranscript.includes("refund")) &&
+      (lowerTranscript.includes("call me") || lowerTranscript.includes("callback") || lowerTranscript.includes("call back") || lowerTranscript.includes("contact me") || lowerTranscript.includes("phone number"))
+    );
+
+  if (isEscalationRequested) {
+    let callerName = newCallLog.customer_name;
+    let callerPhone = newCallLog.customer_phone;
+    let callerEmail = req.body.customer_email || "unknown@thecarnivore.local";
+    
+    if (hasCallbackForm) {
+      const nameMatch = newCallLog.transcript.match(/Name:\s*([^\n]+)/i);
+      const phoneMatch = newCallLog.transcript.match(/Phone:\s*([^\n]+)/i);
+      const emailMatch = newCallLog.transcript.match(/Email:\s*([^\n]+)/i);
+      if (nameMatch && nameMatch[1]) callerName = nameMatch[1].trim();
+      if (phoneMatch && phoneMatch[1]) callerPhone = phoneMatch[1].trim();
+      if (emailMatch && emailMatch[1]) callerEmail = emailMatch[1].trim();
+    }
+
+    if (!callerName || callerName === "Voice Caller") {
+      callerName = "Customer";
+    }
+    if (!callerPhone || callerPhone === "Active Live Session") {
+      callerPhone = "Not provided";
+    }
+
+    const escReason = hasCallbackForm 
+      ? "Manager callback requested via voice widget form" 
+      : "Manager callback requested during conversation";
+
+    const escId = `esc-${Date.now()}`;
+    const newEsc = {
+      id: escId,
+      status: "PENDING",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      customer_name: callerName,
+      customer_phone: callerPhone,
+      customer_email: callerEmail,
+      reason: escReason,
+      transcript: newCallLog.transcript
+    };
+
+    if (supabase && !missingTables.has("escalations")) {
+      try {
+        const { error: escError } = await supabase.from("escalations").insert([{
+          customer_name: callerName,
+          customer_phone: callerPhone,
+          customer_email: callerEmail,
+          reason: escReason,
+          transcript: newCallLog.transcript,
+          status: "PENDING"
+        }]);
+        if (escError) handleSupabaseError("escalations", escError, "insert");
+      } catch (err) {
+        console.warn("Failed to insert escalation from call log:", err);
+      }
+    } else {
+      localEscalations.unshift(newEsc);
+      localEvents.unshift({
+        id: `e-${Date.now()}`,
+        ref_id: escId,
+        type: "escalation",
+        event_type: "CREATED",
+        note: `Human escalation triggered for customer ${callerName}: ${escReason}`,
+        created_at: new Date().toISOString()
+      });
+    }
+  }
+
   if (supabase && !missingTables.has("call_logs")) {
     const { data, error } = await supabase.from("call_logs").insert([{
       customer_name: newCallLog.customer_name,
