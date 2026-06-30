@@ -1218,6 +1218,136 @@ const isDemoEscalation = (escalation: any) => {
   );
 };
 
+const extractTranscriptField = (transcript: string, label: string) => {
+  const match = String(transcript || "").match(new RegExp(`${label}:\\s*([^\\n]+)`, "i"));
+  return match?.[1]?.trim() || "";
+};
+
+const inferEscalationReason = (transcript: string, fallback = "Manager callback requested") => {
+  const lower = String(transcript || "").toLowerCase();
+  if (lower.includes("refund")) return "Refund request / manager callback";
+  if (lower.includes("payment")) return "Payment issue / manager callback";
+  if (lower.includes("complaint")) return "Customer complaint / manager callback";
+  if (lower.includes("manager")) return "Manager callback requested";
+  return fallback;
+};
+
+const transcriptLooksLikeEscalation = (transcript: string) => {
+  const lower = String(transcript || "").toLowerCase();
+  return (
+    lower.includes("manager callback form") ||
+    lower.includes("urgent callback request") ||
+    lower.includes("typed details sent:\nname:") ||
+    (
+      (lower.includes("manager") || lower.includes("human") || lower.includes("refund") || lower.includes("complaint") || lower.includes("payment issue")) &&
+      (lower.includes("phone:") || lower.includes("callback") || lower.includes("call you back") || lower.includes("name:"))
+    )
+  );
+};
+
+const normalizeFeedbackRecord = (feedback: any) => ({
+  ...feedback,
+  id: feedback.id || feedback.session_id || `fb-${Date.now()}`,
+  customer_name: feedback.customer_name || feedback.name || "Customer",
+  customer_phone: feedback.customer_phone || feedback.phone || feedback.caller_phone || "Not provided",
+  customer_email: feedback.customer_email || feedback.email || "feedback@thecarnivore.local",
+  rating: Number(feedback.rating || feedback.stars || 5),
+  comment: feedback.comment || feedback.feedback || feedback.message || "",
+  status: feedback.status || "NEW",
+  created_at: feedback.created_at || new Date().toISOString()
+});
+
+const normalizeEscalationRecord = (escalation: any) => {
+  const transcript = escalation.transcript || escalation.conversation_transcript || "";
+  const extractedName = extractTranscriptField(transcript, "Name");
+  const extractedPhone = extractTranscriptField(transcript, "Phone");
+
+  return {
+    ...escalation,
+    id: escalation.id || escalation.session_id || escalation.conversation_id || `esc-${Date.now()}`,
+    customer_name: escalation.customer_name || escalation.caller_name || escalation.name || extractedName || "Customer",
+    customer_phone: escalation.customer_phone || escalation.caller_phone || escalation.phone || extractedPhone || "Not provided",
+    customer_email: escalation.customer_email || escalation.email || "unknown@thecarnivore.local",
+    reason: escalation.reason || escalation.issue || escalation.query || escalation.modification_details || escalation.faq_question || inferEscalationReason(transcript),
+    transcript,
+    status: escalation.status || "PENDING",
+    created_at: escalation.created_at || new Date().toISOString(),
+    updated_at: escalation.updated_at || escalation.created_at || new Date().toISOString()
+  };
+};
+
+const insertSupabaseVariant = async (tableName: string, variants: any[]) => {
+  if (!supabase || missingTables.has(tableName)) return null;
+
+  let lastError: any = null;
+  for (const payload of variants) {
+    const { data, error } = await supabase.from(tableName).insert([payload]).select();
+    if (!error && data && data[0]) return data[0];
+    lastError = error;
+  }
+
+  handleSupabaseError(tableName, lastError, "insert");
+  return null;
+};
+
+const escalationInsertVariants = (escalation: any) => [
+  {
+    customer_name: escalation.customer_name,
+    customer_phone: escalation.customer_phone,
+    customer_email: escalation.customer_email,
+    reason: escalation.reason,
+    transcript: escalation.transcript,
+    status: escalation.status
+  },
+  {
+    customer_name: escalation.customer_name,
+    customer_phone: escalation.customer_phone,
+    reason: escalation.reason,
+    transcript: escalation.transcript,
+    status: escalation.status
+  },
+  {
+    customer_phone: escalation.customer_phone,
+    transcript: `Name: ${escalation.customer_name}\nPhone: ${escalation.customer_phone}\nReason: ${escalation.reason}\n\n${escalation.transcript || ""}`,
+    session_id: escalation.id,
+    status: escalation.status
+  },
+  {
+    customer_phone: escalation.customer_phone,
+    transcript: `Name: ${escalation.customer_name}\nPhone: ${escalation.customer_phone}\nReason: ${escalation.reason}\n\n${escalation.transcript || ""}`,
+    status: escalation.status
+  }
+];
+
+const feedbackInsertVariants = (feedback: any) => [
+  {
+    customer_name: feedback.customer_name,
+    customer_phone: feedback.customer_phone,
+    customer_email: feedback.customer_email,
+    rating: feedback.rating,
+    comment: feedback.comment,
+    status: feedback.status
+  },
+  {
+    customer_name: feedback.customer_name,
+    customer_phone: feedback.customer_phone,
+    rating: feedback.rating,
+    comment: feedback.comment,
+    status: feedback.status
+  },
+  {
+    customer_phone: feedback.customer_phone,
+    rating: feedback.rating,
+    comment: `Name: ${feedback.customer_name}\nEmail: ${feedback.customer_email}\n\n${feedback.comment}`,
+    session_id: feedback.id
+  },
+  {
+    customer_phone: feedback.customer_phone,
+    rating: feedback.rating,
+    comment: feedback.comment
+  }
+];
+
 const enrichFeedbackWithRecords = (feedbackRows: any[], ordersRows: any[], reservationRows: any[]) => {
   const ordersSorted = [...ordersRows]
     .map(sanitizeOrder)
@@ -1228,6 +1358,7 @@ const enrichFeedbackWithRecords = (feedbackRows: any[], ordersRows: any[], reser
     .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
   return feedbackRows
+    .map(normalizeFeedbackRecord)
     .filter(f => !isDemoFeedback(f))
     .map(feedback => {
       const latestOrder = ordersSorted.find(order => contactMatches(feedback, order));
@@ -1662,7 +1793,7 @@ app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
 app.post("/api/feedback", async (req, res) => {
   const customerPhone = req.body.customer_phone || "Not provided";
   const customerEmail = req.body.customer_email || "feedback@thecarnivore.local";
-  const newFb = {
+  const newFb = normalizeFeedbackRecord({
     id: `fb-${Date.now()}`,
     status: "NEW",
     created_at: new Date().toISOString(),
@@ -1671,22 +1802,13 @@ app.post("/api/feedback", async (req, res) => {
     customer_email: customerEmail,
     rating: Number(req.body.rating || 5),
     comment: req.body.comment
-  };
+  });
 
   if (supabase && !missingTables.has("feedback")) {
-    const { data, error } = await supabase.from("feedback").insert([{
-      customer_name: newFb.customer_name,
-      customer_phone: customerPhone,
-      customer_email: customerEmail,
-      rating: Number(req.body.rating || 5),
-      comment: req.body.comment,
-      status: "NEW"
-    }]).select();
-
-    if (!error && data && data[0]) {
-      return res.status(201).json(data[0]);
+    const inserted = await insertSupabaseVariant("feedback", feedbackInsertVariants(newFb));
+    if (inserted) {
+      return res.status(201).json(normalizeFeedbackRecord(inserted));
     }
-    handleSupabaseError("feedback", error, "insert");
   }
 
   localFeedback.unshift(newFb);
@@ -1704,12 +1826,59 @@ app.post("/api/feedback", async (req, res) => {
 
 // 6. Escalations Routing
 app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
+  let normalizedEscalations: any[] = [];
+
   if (supabase && !missingTables.has("escalations")) {
     const { data, error } = await supabase.from("escalations").select("*").order("created_at", { ascending: false });
-    if (!error && data) return res.json(data.filter((esc: any) => !isDemoEscalation(esc)));
-    handleSupabaseError("escalations", error, "fetch");
+    if (!error && data) {
+      normalizedEscalations = data.map(normalizeEscalationRecord);
+    } else {
+      handleSupabaseError("escalations", error, "fetch");
+    }
   }
-  res.json(localEscalations.filter((esc: any) => !isDemoEscalation(esc)));
+
+  if (supabase && !missingTables.has("call_logs")) {
+    const { data: escalatedLogs, error: callLogError } = await supabase
+      .from("call_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (!callLogError && escalatedLogs) {
+      const callLogEscalations = escalatedLogs
+        .filter((log: any) => normalizeCallStatus(log.status) === "ESCALATED" || transcriptLooksLikeEscalation(log.transcript))
+        .map((log: any) => normalizeEscalationRecord({
+          id: `call-${log.id}`,
+          customer_name: log.customer_name,
+          customer_phone: log.customer_phone,
+          reason: inferEscalationReason(log.transcript, "Manager callback requested from call log"),
+          transcript: log.transcript,
+          status: "PENDING",
+          created_at: log.created_at,
+          updated_at: log.updated_at || log.created_at
+        }));
+      normalizedEscalations.push(...callLogEscalations);
+    } else {
+      handleSupabaseError("call_logs", callLogError, "fetch-escalated");
+    }
+  }
+
+  if (normalizedEscalations.length === 0) {
+    normalizedEscalations = localEscalations.map(normalizeEscalationRecord);
+  }
+
+  const seen = new Set<string>();
+  const deduped = normalizedEscalations
+    .filter((esc: any) => !isDemoEscalation(esc))
+    .filter((esc: any) => {
+      const key = `${normalizePhoneKey(esc.customer_phone)}|${String(esc.transcript || esc.reason || "").slice(0, 120)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+  res.json(deduped);
 });
 
 app.post("/api/escalations", async (req, res) => {
@@ -1717,7 +1886,7 @@ app.post("/api/escalations", async (req, res) => {
   const customerPhone = req.body.customer_phone || req.body.caller_phone || "Unknown phone";
   const customerEmail = req.body.customer_email || "unknown@thecarnivore.local";
   const reason = req.body.reason || req.body.modification_details || req.body.faq_question || req.body.transcript || "Human callback requested";
-  const newEsc = {
+  const newEsc = normalizeEscalationRecord({
     id: `esc-${Date.now()}`,
     status: "PENDING",
     created_at: new Date().toISOString(),
@@ -1727,19 +1896,22 @@ app.post("/api/escalations", async (req, res) => {
     customer_email: customerEmail,
     reason,
     transcript: req.body.transcript || ""
-  };
+  });
 
   if (supabase && !missingTables.has("escalations")) {
-    const { data, error } = await supabase.from("escalations").insert([{
-      customer_name: customerName,
-      customer_phone: customerPhone,
-      customer_email: customerEmail,
-      reason,
-      transcript: req.body.transcript || "",
-      status: "PENDING"
-    }]).select();
-    if (!error && data) return res.status(201).json(data[0]);
-    handleSupabaseError("escalations", error, "insert");
+    const inserted = await insertSupabaseVariant("escalations", escalationInsertVariants(newEsc));
+    if (inserted) return res.status(201).json(normalizeEscalationRecord(inserted));
+  }
+
+  if (supabase && !missingTables.has("call_logs")) {
+    const callLogInserted = await insertSupabaseVariant("call_logs", [{
+      customer_name: newEsc.customer_name,
+      customer_phone: newEsc.customer_phone,
+      duration_seconds: 0,
+      transcript: `Name: ${newEsc.customer_name}\nPhone: ${newEsc.customer_phone}\nReason: ${newEsc.reason}\n\n${newEsc.transcript || ""}`,
+      status: "ESCALATED"
+    }]);
+    if (callLogInserted) return res.status(201).json(newEsc);
   }
 
   localEscalations.unshift(newEsc);
@@ -1836,6 +2008,7 @@ app.post("/api/call-logs", async (req, res) => {
     );
 
   if (isEscalationRequested) {
+    newCallLog.status = "ESCALATED";
     let callerName = newCallLog.customer_name;
     let callerPhone = newCallLog.customer_phone;
     let callerEmail = req.body.customer_email || "unknown@thecarnivore.local";
@@ -1874,20 +2047,13 @@ app.post("/api/call-logs", async (req, res) => {
     };
 
     if (supabase && !missingTables.has("escalations")) {
-      try {
-        const { error: escError } = await supabase.from("escalations").insert([{
-          customer_name: callerName,
-          customer_phone: callerPhone,
-          customer_email: callerEmail,
-          reason: escReason,
-          transcript: newCallLog.transcript,
-          status: "PENDING"
-        }]);
-        if (escError) handleSupabaseError("escalations", escError, "insert");
-      } catch (err) {
-        console.warn("Failed to insert escalation from call log:", err);
+      const insertedEscalation = await insertSupabaseVariant("escalations", escalationInsertVariants(newEsc));
+      if (!insertedEscalation) {
+        console.warn("Escalation table insert failed from call log; the ESCALATED call_log row will be used as admin fallback.");
       }
-    } else {
+    }
+
+    if (!supabase || missingTables.has("escalations")) {
       localEscalations.unshift(newEsc);
       localEvents.unshift({
         id: `e-${Date.now()}`,
