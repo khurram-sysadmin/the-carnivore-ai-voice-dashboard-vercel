@@ -1481,6 +1481,72 @@ const dedupeFeedbackRecords = (feedbackRows: any[]) => {
     .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 };
 
+const recordTextKey = (value: any) => String(value || "")
+  .replace(/^Name:\s*.+$/gim, "")
+  .replace(/^Phone:\s*.+$/gim, "")
+  .replace(/^Email:\s*.+$/gim, "")
+  .replace(/^Reason:\s*.+$/gim, "")
+  .replace(/\s+/g, " ")
+  .trim()
+  .toLowerCase()
+  .slice(0, 180);
+
+const recordDateKey = (value: any) => String(value || "").slice(0, 10);
+
+const feedbackPersistenceKey = (feedback: any) => [
+  normalizePhoneKey(feedback.customer_phone),
+  recordDateKey(feedback.created_at),
+  recordTextKey(feedback.comment)
+].join("|");
+
+const escalationPersistenceKey = (escalation: any) => [
+  normalizePhoneKey(escalation.customer_phone),
+  recordDateKey(escalation.created_at),
+  recordTextKey(escalation.transcript || escalation.reason)
+].join("|");
+
+const persistFeedbackRowsToSupabase = async (derivedRows: any[], existingRows: any[]) => {
+  if (!supabase || missingTables.has("feedback") || derivedRows.length === 0) {
+    return derivedRows.map(normalizeFeedbackRecord);
+  }
+
+  const knownKeys = new Set(existingRows.map(row => feedbackPersistenceKey(normalizeFeedbackRecord(row))));
+  const persistedRows: any[] = [];
+
+  for (const row of derivedRows.map(normalizeFeedbackRecord)) {
+    const key = feedbackPersistenceKey(row);
+    if (knownKeys.has(key)) continue;
+
+    const inserted = await insertSupabaseVariant("feedback", feedbackInsertVariants(row));
+    const normalized = normalizeFeedbackRecord(inserted || row);
+    knownKeys.add(key);
+    persistedRows.push(normalized);
+  }
+
+  return persistedRows;
+};
+
+const persistEscalationsToSupabase = async (derivedRows: any[], existingRows: any[]) => {
+  if (!supabase || missingTables.has("escalations") || derivedRows.length === 0) {
+    return derivedRows.map(normalizeEscalationRecord);
+  }
+
+  const knownKeys = new Set(existingRows.map(row => escalationPersistenceKey(normalizeEscalationRecord(row))));
+  const persistedRows: any[] = [];
+
+  for (const row of derivedRows.map(normalizeEscalationRecord)) {
+    const key = escalationPersistenceKey(row);
+    if (knownKeys.has(key)) continue;
+
+    const inserted = await insertSupabaseVariant("escalations", escalationInsertVariants(row));
+    const normalized = normalizeEscalationRecord(inserted || row);
+    knownKeys.add(key);
+    persistedRows.push(normalized);
+  }
+
+  return persistedRows;
+};
+
 // 2.9 Customer-facing lookups (Public but strictly filtered)
 app.get("/api/customer/orders", async (req, res) => {
   const { phone, email, order_number } = req.query;
@@ -1893,6 +1959,8 @@ app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
     feedbackRows = [...localFeedback];
   }
 
+  let derivedFeedbackRows: any[] = [];
+
   if (supabase && !missingTables.has("call_logs")) {
     const { data: savedCallLogs, error: callLogError } = await supabase
       .from("call_logs")
@@ -1905,7 +1973,7 @@ app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
         .map(normalizeSavedCallLog)
         .filter(log => transcriptLooksLikeFeedback(log.transcript))
         .map(feedbackFromCallLog);
-      feedbackRows.push(...callLogFeedback);
+      derivedFeedbackRows.push(...callLogFeedback);
     } else {
       handleSupabaseError("call_logs", callLogError, "fetch-feedback");
     }
@@ -1914,7 +1982,10 @@ app.get("/api/feedback", requireOwnerAuth, async (req, res) => {
   const elevenLabsFeedback = (await fetchElevenLabsCallLogs(50))
     .filter(log => transcriptLooksLikeFeedback(log.transcript))
     .map(feedbackFromCallLog);
-  feedbackRows.push(...elevenLabsFeedback);
+  derivedFeedbackRows.push(...elevenLabsFeedback);
+
+  const persistedFeedbackRows = await persistFeedbackRowsToSupabase(derivedFeedbackRows, feedbackRows);
+  feedbackRows.push(...persistedFeedbackRows);
 
   const contextOrders = ordersForContext.length ? ordersForContext : localOrders;
   const contextReservations = reservationsForContext.length ? reservationsForContext : localReservations;
@@ -1986,6 +2057,8 @@ app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
     }
   }
 
+  let derivedEscalations: any[] = [];
+
   if (supabase && !missingTables.has("call_logs")) {
     const { data: escalatedLogs, error: callLogError } = await supabase
       .from("call_logs")
@@ -2006,7 +2079,7 @@ app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
           created_at: log.created_at,
           updated_at: log.updated_at || log.created_at
         }));
-      normalizedEscalations.push(...callLogEscalations);
+      derivedEscalations.push(...callLogEscalations);
     } else {
       handleSupabaseError("call_logs", callLogError, "fetch-escalated");
     }
@@ -2025,7 +2098,10 @@ app.get("/api/escalations", requireOwnerAuth, async (req, res) => {
       updated_at: log.created_at
     }));
 
-  normalizedEscalations.push(...elevenLabsEscalations);
+  derivedEscalations.push(...elevenLabsEscalations);
+
+  const persistedEscalations = await persistEscalationsToSupabase(derivedEscalations, normalizedEscalations);
+  normalizedEscalations.push(...persistedEscalations);
 
   if (normalizedEscalations.length === 0) {
     normalizedEscalations = localEscalations.map(normalizeEscalationRecord);
